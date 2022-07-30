@@ -42,14 +42,18 @@ use {
         net::SocketAddr,
         ops::Not,
         path::{Path, PathBuf},
+        pin::Pin,
     },
     ::structopt::{
         StructOpt,
     },
     ::tokio::{
-        codec::{BytesCodec, FramedRead},
         fs::File,
+        io::{AsyncRead, AsyncReadExt},
         runtime::Runtime,
+    },
+    ::tokio_util::{
+        codec::{BytesCodec, FramedRead},
     },
     crate::utils::{
         Also as _,
@@ -61,10 +65,6 @@ extern crate extension_traits;
 
 pub use error::Error;
 mod error;
-
-// Developer extensions. These are contained in their own module so that the
-// principle HTTP server behavior is not obscured.
-mod ext;
 
 mod utils;
 
@@ -154,15 +154,42 @@ fn run ()
         future::ok::<_, Error>(service)
     });
 
-    // Create a Hyper Server, binding to an address, and use
-    // our service builder.
-    let server = Server::bind(&config.addr).serve(make_service);
-
     // Create a Tokio runtime and block on Hyper forever.
     let rt = Runtime::new()?;
-    rt.block_on(server)?;
+
+    rt.spawn(async {
+        spin_ws_server()
+            .await
+            .unwrap()
+    });
+    rt.block_on(async {
+        // Create a Hyper Server, binding to an address, and use
+        // our service builder.
+        Server::bind(&config.addr)
+            .serve(make_service)
+            .await
+    })?;
 
     Ok(())
+}
+
+async
+fn spin_ws_server ()
+  -> ::anyhow::Result<()>
+{
+    loop {
+        let ws =
+            ::tokio_tungstenite::accept_async(
+                ::tokio::net::TcpListener::bind(("127.0.0.1", 8090))
+                    .await?
+                    .accept()
+                    .await?
+                    .0
+            )
+            .await?
+        ;
+        ws.for_each(|_| async {}).await;
+    }
 }
 
 /// Create an HTTP Response future for each Request.
@@ -191,9 +218,7 @@ fn serve_or_error (config: Config, req: Request<Body>)
         return resp;
     }
     // Serve the requested file.
-    let resp = serve_file(&req, &config.root_dir).await;
-    // Give developer extensions an opportunity to post-process the request/response pair.
-    ext::serve(config, req, resp).await
+    serve_file(&req, &config.root_dir).await
 }
 
 /// Serve static files from a root directory.
@@ -204,15 +229,12 @@ fn serve_file (req: &Request<Body>, root_dir: &PathBuf)
     // First, try to do a redirect. If that doesn't happen, then find the path
     // to the static file we want to serve - which may be `index.html` for
     // directories - and send a response containing that file.
-    let maybe_redir_resp = try_dir_redirect(req, &root_dir)?;
-
-    if let Some(redir_resp) = maybe_redir_resp {
-        return Ok(redir_resp);
+    if let Some(redir_resp) = try_dir_redirect(req, &root_dir)? {
+        Ok(redir_resp)
+    } else {
+        respond_with_file(&local_path_with_maybe_index(req.uri(), &root_dir)?)
+            .await
     }
-
-    let path = local_path_with_maybe_index(req.uri(), &root_dir)?;
-
-    respond_with_file(path).await
 }
 
 /// Try to do a 302 redirect for directories.
@@ -238,22 +260,17 @@ fn try_dir_redirect (
     if req.uri().path().ends_with("/") {
         return Ok(None);
     }
-
     debug!("path does not end with /");
-
     let path = local_path_for_request(req.uri(), root_dir)?;
-
     if path.is_dir().not() {
         return Ok(None);
     }
-
     let mut new_loc = req.uri().path().to_string();
     new_loc.push_str("/");
     if let Some(query) = req.uri().query() {
         new_loc.push_str("?");
         new_loc.push_str(query);
     }
-
     info!("redirecting {} to {}", req.uri(), new_loc);
     Response::builder()
         .status(StatusCode::FOUND)
@@ -269,21 +286,35 @@ fn try_dir_redirect (
 /// If the I/O here fails then an error future will be returned, and `serve`
 /// will convert it into the appropriate HTTP error response.
 async
-fn respond_with_file (path: PathBuf)
+fn respond_with_file (path: &Path)
   -> Result<Response<Body>>
 {
     let mime_type = file_path_mime(&path);
     let file = File::open(path).await?;
     let meta = file.metadata().await?;
-    let len = meta.len();
-    // Here's the streaming code. How to do this isn't documented in the
-    // Tokio/Hyper API docs. Codecs are how Tokio creates Streams; a FramedRead
+    let mut len = meta.len();
+    let stream: Pin<Box<dyn AsyncRead + Send>> =
+        if matches!(
+            path.extension(), Some(ext) if ext.eq_ignore_ascii_case("html")
+        )
+        {
+
+            let injected_js = &include_bytes!("client_template.html")[..];
+            len += injected_js.len() as u64;
+            Box::pin(file.chain(injected_js))
+        } else {
+            Box::pin(file)
+        }
+    ;
+
+    // Here's the streaming code.
+    // Codecs are how Tokio creates Streams; a FramedRead
     // turns an AsyncRead plus a Decoder into a Stream; and BytesCodec is a
     // Decoder. FramedRead though creates a Stream<Result<BytesMut>> and Hyper's
     // Body wants a Stream<Result<Bytes>>, and BytesMut::freeze will give us a
     // Bytes.
     let codec = BytesCodec::new();
-    let stream = FramedRead::new(file, codec);
+    let stream = FramedRead::new(stream, codec);
     let stream = stream.map(|b| b.map(BytesMut::freeze));
     let body = Body::wrap_stream(stream);
     Response::builder()
@@ -300,7 +331,8 @@ fn respond_with_file (path: PathBuf)
 fn file_path_mime (file_path: &Path)
   -> ::mime::Mime
 {
-    ::mime_guess::from_path(file_path).first_or_octet_stream()
+    ::mime_guess::from_path(file_path)
+        .first_or_octet_stream()
 }
 
 /// Find the local path for a request URI, converting directories to the
@@ -324,15 +356,11 @@ fn local_path_for_request (uri: &Uri, root_dir: &Path)
   -> Result<PathBuf>
 {
     debug!("raw URI: {}", uri);
-
     let request_path = uri.path();
-
     debug!("raw URI to path: {}", request_path);
-
     // Trim off the url parameters starting with '?'
     let end = request_path.find('?').unwrap_or(request_path.len());
     let request_path = &request_path[0..end];
-
     // Convert %-encoding to actual values
     let decoded = percent_decode_str(&request_path);
     let request_path = if let Ok(p) = decoded.decode_utf8() {
@@ -341,7 +369,6 @@ fn local_path_for_request (uri: &Uri, root_dir: &Path)
         error!("non utf-8 URL: {}", request_path);
         return Err(Error::UriNotUtf8);
     };
-
     // Append the requested path to the root directory
     let mut path = root_dir.to_owned();
     if request_path.starts_with('/') {
@@ -350,9 +377,7 @@ fn local_path_for_request (uri: &Uri, root_dir: &Path)
         warn!("found non-absolute path {}", request_path);
         return Err(Error::UriNotAbsolute);
     }
-
     debug!("URL · path : {} · {}", uri, path.display());
-
     Ok(path)
 }
 
@@ -388,58 +413,31 @@ fn get_unsupported_request_message (req: &Request<Body>)
 fn transform_error (resp: Result<Response<Body>>)
   -> Response<Body>
 {
-    match resp {
-        Ok(r) => r,
-        Err(e) => {
-            let resp = make_error_response(e);
-            match resp {
-                Ok(r) => r,
-                Err(e) => {
-                    // Last-ditch error reporting if
-                    // even making the error response failed.
-                    error!("unexpected internal error: {}", e);
-                    Response::new(Body::from(
-                        format!("unexpected internal error: {}", e),
-                    ))
-                }
-            }
-        }
-    }
+    resp.or_else(|ref err| make_error_response_from_code(match err {
+            Error::Io(io_err) => match io_err.kind() {
+                io::ErrorKind::NotFound => {
+                    debug!("{}", io_err);
+                    StatusCode::NOT_FOUND
+                },
+                _ => {
+                    log_error_chain(err);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                },
+            },
+            _ => {
+                log_error_chain(err);
+                StatusCode::INTERNAL_SERVER_ERROR
+            },
+        }))
+        .unwrap_or_else(|e| {
+            // Last-ditch error reporting if
+            // even making the error response failed.
+            error!("unexpected internal error: {}", e);
+            Response::new(Body::from(
+                format!("unexpected internal error: {}", e),
+            ))
+        })
 }
-
-/// Convert an error to an HTTP error response future, with correct response code.
-fn make_error_response (e: Error)
-  -> Result<Response<Body>>
-{
-    match e {
-        Error::Io(e) => make_io_error_response(e),
-        Error::Ext(ext::Error::Io(e)) => make_io_error_response(e),
-        e => make_internal_server_error_response(e),
-    }
-}
-
-/// Convert an error into a 500 internal server error, and log it.
-fn make_internal_server_error_response (err: Error)
-  -> Result<Response<Body>>
-{
-    log_error_chain(&err);
-    make_error_response_from_code(StatusCode::INTERNAL_SERVER_ERROR)
-}
-
-/// Handle the one special IO error (file not found) by returning a 404, otherwise
-/// return a 500.
-fn make_io_error_response (error: io::Error)
-  -> Result<Response<Body>>
-{
-    match error.kind() {
-        io::ErrorKind::NotFound => {
-            debug!("{}", error);
-            make_error_response_from_code(StatusCode::NOT_FOUND)
-        },
-        _ => make_internal_server_error_response(Error::Io(error)),
-    }
-}
-
 /// Make an error response given an HTTP status code.
 fn make_error_response_from_code (status: StatusCode)
   -> Result<Response<Body>>

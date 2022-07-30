@@ -21,10 +21,6 @@ use super::*;
 #[derive(Debug, Display)]
 pub
 enum Error {
-    // blanket "pass-through" error types
-    #[display(fmt = "Extension error")]
-    Ext(ext::Error),
-
     #[display(fmt = "HTTP error")]
     Http(http::Error),
 
@@ -52,30 +48,19 @@ impl StdError for Error {
     fn source (self: &'_ Error)
       -> Option<&'_ (dyn StdError + 'static)>
     {
-        use Error::*;
-
         match self {
-            Ext(e) => Some(e),
-            Io(e) => Some(e),
-            Http(e) => Some(e),
-            Hyper(e) => Some(e),
-            AddrParse(e) => Some(e),
-            TemplateRender(e) => Some(e),
-            UriNotAbsolute => None,
-            UriNotUtf8 => None,
+            Self::Io(e) => Some(e),
+            Self::Http(e) => Some(e),
+            Self::Hyper(e) => Some(e),
+            Self::AddrParse(e) => Some(e),
+            Self::TemplateRender(e) => Some(e),
+            Self::UriNotAbsolute => None,
+            Self::UriNotUtf8 => None,
         }
     }
 }
 
-impl From<ext::Error> for Error {
-    fn from (e: ext::Error)
-      -> Error
-    {
-        Error::Ext(e)
-    }
-}
-
-impl From<http::Error> for Error {
+impl From<::http::Error> for Error {
     fn from (e: http::Error)
       -> Error
     {
@@ -83,7 +68,7 @@ impl From<http::Error> for Error {
     }
 }
 
-impl From<hyper::Error> for Error {
+impl From<::hyper::Error> for Error {
     fn from (e: hyper::Error)
       -> Error
     {

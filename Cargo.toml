@@ -10,21 +10,32 @@ readme = "README.md"
 edition = "2018"
 
 [dependencies]
-bytes = "0.4.12"
+anyhow.version = "1.0.58"
+bytes.version = "1.2.1"
+extension-traits.version = "1.0.1"
+futures.version = "0.3.21"
+futures.package = "futures"
+http.version = "0.2.8"
+hyper.version = "0.14.20"
+hyper.features = ["http1", "server", "stream", "tcp"]
+tokio.version = "1.19.2"
+tokio.features = ["full"]
+tokio-stream.version = "0.1.9"
+tokio-stream.features = ["fs"]
+tokio-tungstenite.version = "0.17.2"
+tokio-util.version = "0.7.2"
+tokio-util.features = ["codec"]
+
 clap = "2.33.0"
 comrak = "0.6.2"
 derive_more = "0.15.0"
 env_logger = "0.6.2"
-futures-preview = "0.3.0-alpha.19"
 handlebars = "1.1.0"
-http = "0.1.19"
-hyper = { version = "0.13.0-alpha.4", features = ["unstable-stream"] }
 log = "0.4.8"
 mime = "0.3.14"
 mime_guess = "2.0.1"
 percent-encoding = "2.1.0"
 serde = { version = "1.0.102", features = ["derive"] }
-tokio = "0.2.0-alpha.6"
-tokio-fs = "0.2.0-alpha.6"
 structopt = "0.2.18"
-extension-traits = "1.0.1"
+
+[features]
