@@ -28,7 +28,7 @@ use {
         },
     },
     ::log::{
-        {debug, error, info, trace, warn},
+        debug, error, info, trace, warn,
     },
     ::percent_encoding::{
         percent_decode_str,
@@ -40,6 +40,7 @@ use {
         error::Error as StdError,
         io,
         net::SocketAddr,
+        ops::Not,
         path::{Path, PathBuf},
     },
     ::structopt::{
@@ -50,7 +51,13 @@ use {
         fs::File,
         runtime::Runtime,
     },
+    crate::utils::{
+        Also as _,
+    },
 };
+
+#[macro_use]
+extern crate extension_traits;
 
 pub use error::Error;
 mod error;
@@ -58,6 +65,8 @@ mod error;
 // Developer extensions. These are contained in their own module so that the
 // principle HTTP server behavior is not obscured.
 mod ext;
+
+mod utils;
 
 /// A custom `Result` typedef
 pub
@@ -111,12 +120,11 @@ fn run ()
 {
     // Initialize logging, and log the "info" level for this crate only, unless
     // the environment contains `RUST_LOG`.
-    let env = Env::new().default_filter_or("basic_http_server=info");
-    Builder::from_env(env)
+    Builder::from_env(Env::new().default_filter_or("basic_http_server=info"))
         .default_format_module_path(false)
         .default_format_timestamp(false)
-        .init();
-
+        .init()
+    ;
     // Create the configuration from the command line arguments. It
     // includes the IP address and port to listen on and the path to use
     // as the HTTP server's root directory.
@@ -167,11 +175,8 @@ fn serve (config: Config, req: Request<Body>)
 {
     // Serve the requested file.
     let resp = serve_or_error(config, req).await;
-
     // Transform internal errors to error responses.
-    let resp = transform_error(resp);
-
-    resp
+    transform_error(resp)
 }
 
 /// Handle all types of requests, but don't deal with transforming internal
@@ -185,14 +190,10 @@ fn serve_or_error (config: Config, req: Request<Body>)
     if let Some(resp) = handle_unsupported_request(&req) {
         return resp;
     }
-
     // Serve the requested file.
     let resp = serve_file(&req, &config.root_dir).await;
-
     // Give developer extensions an opportunity to post-process the request/response pair.
-    let resp = ext::serve(config, req, resp).await;
-
-    resp
+    ext::serve(config, req, resp).await
 }
 
 /// Serve static files from a root directory.
@@ -211,7 +212,7 @@ fn serve_file (req: &Request<Body>, root_dir: &PathBuf)
 
     let path = local_path_with_maybe_index(req.uri(), &root_dir)?;
 
-    Ok(respond_with_file(path).await?)
+    respond_with_file(path).await
 }
 
 /// Try to do a 302 redirect for directories.
@@ -242,7 +243,7 @@ fn try_dir_redirect (
 
     let path = local_path_for_request(req.uri(), root_dir)?;
 
-    if !path.is_dir() {
+    if path.is_dir().not() {
         return Ok(None);
     }
 
@@ -272,38 +273,32 @@ fn respond_with_file (path: PathBuf)
   -> Result<Response<Body>>
 {
     let mime_type = file_path_mime(&path);
-
     let file = File::open(path).await?;
-
     let meta = file.metadata().await?;
     let len = meta.len();
-
     // Here's the streaming code. How to do this isn't documented in the
     // Tokio/Hyper API docs. Codecs are how Tokio creates Streams; a FramedRead
     // turns an AsyncRead plus a Decoder into a Stream; and BytesCodec is a
     // Decoder. FramedRead though creates a Stream<Result<BytesMut>> and Hyper's
     // Body wants a Stream<Result<Bytes>>, and BytesMut::freeze will give us a
     // Bytes.
-
     let codec = BytesCodec::new();
     let stream = FramedRead::new(file, codec);
     let stream = stream.map(|b| b.map(BytesMut::freeze));
     let body = Body::wrap_stream(stream);
-
-    let resp = Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_LENGTH, len as u64)
         .header(header::CONTENT_TYPE, mime_type.as_ref())
-        .body(body)?;
-
-    Ok(resp)
+        .body(body)
+        .map_err(Into::into)
 }
 
 /// Get a MIME type based on the file extension.
 ///
 /// If the extension is unknown then return "application/octet-stream".
 fn file_path_mime (file_path: &Path)
-  -> mime::Mime
+  -> ::mime::Mime
 {
     ::mime_guess::from_path(file_path).first_or_octet_stream()
 }
@@ -366,8 +361,8 @@ fn local_path_for_request (uri: &Uri, root_dir: &Path)
 fn handle_unsupported_request (req: &Request<Body>)
   -> Option<Result<Response<Body>>>
 {
-    get_unsupported_request_message(req)
-        .map(|unsup| make_error_response_from_code_and_headers(unsup.code, unsup.headers))
+    let unsup = get_unsupported_request_message(req)?;
+    Some(make_error_response_from_code_and_headers(unsup.code, unsup.headers))
 }
 
 /// Description of an unsupported request.
@@ -380,17 +375,13 @@ struct Unsupported {
 fn get_unsupported_request_message (req: &Request<Body>)
   -> Option<Unsupported>
 {
-    use std::iter::FromIterator;
-
     // https://tools.ietf.org/html/rfc7231#section-6.5.5
-    if req.method() != Method::GET {
-        return Some(Unsupported {
-            code: StatusCode::METHOD_NOT_ALLOWED,
-            headers: HeaderMap::from_iter(vec![(header::ALLOW, HeaderValue::from_static("GET"))]),
-        });
-    }
-
-    None
+    (req.method() != Method::GET).then(|| Unsupported {
+        code: StatusCode::METHOD_NOT_ALLOWED,
+        headers: ::core::iter::once(
+            (header::ALLOW, HeaderValue::from_static("GET")),
+        ).collect(),
+    })
 }
 
 /// Turn any errors into an HTTP error response.
@@ -404,9 +395,12 @@ fn transform_error (resp: Result<Response<Body>>)
             match resp {
                 Ok(r) => r,
                 Err(e) => {
-                    // Last-ditch error reporting if even making the error response failed.
+                    // Last-ditch error reporting if
+                    // even making the error response failed.
                     error!("unexpected internal error: {}", e);
-                    Response::new(Body::from(format!("unexpected internal error: {}", e)))
+                    Response::new(Body::from(
+                        format!("unexpected internal error: {}", e),
+                    ))
                 }
             }
         }
@@ -417,12 +411,11 @@ fn transform_error (resp: Result<Response<Body>>)
 fn make_error_response (e: Error)
   -> Result<Response<Body>>
 {
-    let resp = match e {
-        Error::Io(e) => make_io_error_response(e)?,
-        Error::Ext(ext::Error::Io(e)) => make_io_error_response(e)?,
-        e => make_internal_server_error_response(e)?,
-    };
-    Ok(resp)
+    match e {
+        Error::Io(e) => make_io_error_response(e),
+        Error::Ext(ext::Error::Io(e)) => make_io_error_response(e),
+        e => make_internal_server_error_response(e),
+    }
 }
 
 /// Convert an error into a 500 internal server error, and log it.
@@ -430,8 +423,7 @@ fn make_internal_server_error_response (err: Error)
   -> Result<Response<Body>>
 {
     log_error_chain(&err);
-    let resp = make_error_response_from_code(StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(resp)
+    make_error_response_from_code(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// Handle the one special IO error (file not found) by returning a 404, otherwise
@@ -439,14 +431,13 @@ fn make_internal_server_error_response (err: Error)
 fn make_io_error_response (error: io::Error)
   -> Result<Response<Body>>
 {
-    let resp = match error.kind() {
+    match error.kind() {
         io::ErrorKind::NotFound => {
             debug!("{}", error);
-            make_error_response_from_code(StatusCode::NOT_FOUND)?
-        }
-        _ => make_internal_server_error_response(Error::Io(error))?,
-    };
-    Ok(resp)
+            make_error_response_from_code(StatusCode::NOT_FOUND)
+        },
+        _ => make_internal_server_error_response(Error::Io(error)),
+    }
 }
 
 /// Make an error response given an HTTP status code.
@@ -463,8 +454,7 @@ fn make_error_response_from_code_and_headers (
 ) -> Result<Response<Body>>
 {
     let body = render_error_html(status)?;
-    let resp = html_str_to_response_with_headers(body, status, headers)?;
-    Ok(resp)
+    html_str_to_response_with_headers(body, status, headers)
 }
 
 /// Make an HTTP response from a HTML string.
@@ -481,14 +471,11 @@ fn html_str_to_response_with_headers (
     headers: HeaderMap,
 ) -> Result<Response<Body>>
 {
-    let mut builder = Response::builder();
-
-    builder.headers_mut().map(|h| h.extend(headers));
-
-    builder
+    Response::builder()
+        .also(|b| { b.headers_mut().map(|h| h.extend(headers)); })
         .status(status)
         .header(header::CONTENT_LENGTH, body.len())
-        .header(header::CONTENT_TYPE, mime::TEXT_HTML.as_ref())
+        .header(header::CONTENT_TYPE, ::mime::TEXT_HTML.as_ref())
         .body(Body::from(body))
         .map_err(Error::from)
 }
@@ -508,11 +495,9 @@ struct HtmlCfg {
 fn render_html (cfg: HtmlCfg)
   -> Result<String>
 {
-    let reg = Handlebars::new();
-    let rendered = reg
+    Handlebars::new()
         .render_template(HTML_TEMPLATE, &cfg)
-        .map_err(Error::TemplateRender)?;
-    Ok(rendered)
+        .map_err(Error::TemplateRender)
 }
 
 /// Render an HTML page from an HTTP status code

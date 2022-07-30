@@ -3,28 +3,37 @@
 //! This code is not as clean and well-documented as main.rs,
 //! but could still be a useful read.
 
-use super::{Config, HtmlCfg};
-use comrak::ComrakOptions;
-use futures::{future, StreamExt};
-use http::{Request, Response, StatusCode};
-use hyper::{header, Body};
-use log::{trace, warn};
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-use std::error::Error as StdError;
-use std::ffi::OsStr;
-use std::fmt::Write;
-use std::io;
-use std::path::{Path, PathBuf};
-use tokio_fs::DirEntry;
+use {
+    ::comrak::{
+        ComrakOptions,
+    },
+    ::percent_encoding::{
+        utf8_percent_encode, AsciiSet, CONTROLS,
+    },
+    ::std::{
+        ffi::OsStr,
+        fmt::Write,
+    },
+    ::tokio_fs::{
+        DirEntry,
+    },
+    super::{
+        *,
+    },
+};
 
 /// The entry point to extensions. Extensions are given both the request and the
 /// response result from regular file serving, and have the opportunity to
 /// replace the response with their own response.
-pub async fn serve(
+pub
+async
+fn serve (
     config: Config,
     req: Request<Body>,
     resp: super::Result<Response<Body>>,
-) -> super::Result<Response<Body>> {
+)
+  -> super::Result<Response<Body>>
+{
     trace!("checking extensions");
 
     if !config.use_extensions {
@@ -46,9 +55,12 @@ pub async fn serve(
             Ok(resp)
         }
         Err(super::Error::Io(e)) => {
-            // If the requested file was not found, then try doing a directory listing.
+            // If the requested file was not found,
+            // then try doing a directory listing.
             if e.kind() == io::ErrorKind::NotFound {
-                let list_dir_resp = maybe_list_dir(&config.root_dir, &path).await?;
+                let list_dir_resp =
+                    maybe_list_dir(&config.root_dir, &path).await?
+                ;
                 trace!("using directory list extension");
                 if let Some(f) = list_dir_resp {
                     Ok(f)
@@ -64,7 +76,10 @@ pub async fn serve(
 }
 
 /// Load a markdown file, render to HTML, and return the response.
-async fn md_path_to_html(path: &Path) -> Result<Response<Body>> {
+async
+fn md_path_to_html (path: &Path)
+  -> Result<Response<Body>>
+{
     // Render Markdown like GitHub
     let mut options = ComrakOptions::default();
     options.ext_autolink = true;
@@ -93,7 +108,11 @@ async fn md_path_to_html(path: &Path) -> Result<Response<Body>> {
         .map_err(Error::from)
 }
 
-fn maybe_convert_mime_type_to_text(req: &Request<Body>, resp: &mut Response<Body>) {
+fn maybe_convert_mime_type_to_text (
+    req: &Request<Body>,
+    resp: &mut Response<Body>,
+)
+{
     let path = req.uri().path();
     let file_name = path.rsplit('/').next();
     if let Some(file_name) = file_name {
@@ -111,16 +130,17 @@ fn maybe_convert_mime_type_to_text(req: &Request<Body>, resp: &mut Response<Body
         }
 
         if do_convert {
-            use http::header::HeaderValue;
             let val =
-                HeaderValue::from_str(mime::TEXT_PLAIN.as_ref()).expect("mime is valid header");
+                HeaderValue::from_str(mime::TEXT_PLAIN.as_ref())
+                    .expect("mime is valid header")
+            ;
             resp.headers_mut().insert(header::CONTENT_TYPE, val);
         }
     }
 }
 
 #[rustfmt::skip]
-static TEXT_EXTENSIONS: &[&'static str] = &[
+const TEXT_EXTENSIONS: &[&'static str] = &[
     "c",
     "cc",
     "cpp",
@@ -141,7 +161,7 @@ static TEXT_EXTENSIONS: &[&'static str] = &[
 ];
 
 #[rustfmt::skip]
-static TEXT_FILES: &[&'static str] = &[
+const TEXT_FILES: &[&'static str] = &[
     ".gitattributes",
     ".gitignore",
     ".mailmap",
@@ -159,7 +179,10 @@ static TEXT_FILES: &[&'static str] = &[
 ];
 
 /// Try to treat the path as a directory and list the contents as HTML.
-async fn maybe_list_dir(root_dir: &Path, path: &Path) -> Result<Option<Response<Body>>> {
+async
+fn maybe_list_dir (root_dir: &Path, path: &Path)
+  -> Result<Option<Response<Body>>>
+{
     let meta = tokio::fs::metadata(path).await?;
     if meta.is_dir() {
         Ok(Some(list_dir(&root_dir, path).await?))
@@ -169,7 +192,10 @@ async fn maybe_list_dir(root_dir: &Path, path: &Path) -> Result<Option<Response<
 }
 
 /// List the contents of a directory as HTML.
-async fn list_dir(root_dir: &Path, path: &Path) -> Result<Response<Body>> {
+async
+fn list_dir (root_dir: &Path, path: &Path)
+  -> Result<Response<Body>>
+{
     let up_dir = path.join("..");
     let path = path.to_owned();
     let dents = tokio::fs::read_dir(path).await?;
@@ -190,7 +216,9 @@ async fn list_dir(root_dir: &Path, path: &Path) -> Result<Response<Body>> {
     Ok(resp)
 }
 
-fn make_dir_list_body(root_dir: &Path, paths: &[PathBuf]) -> Result<String> {
+fn make_dir_list_body (root_dir: &Path, paths: &[PathBuf])
+  -> Result<String>
+{
     let mut buf = String::new();
 
     writeln!(buf, "<div>").map_err(Error::WriteInDirList)?;
@@ -214,14 +242,31 @@ fn make_dir_list_body(root_dir: &Path, paths: &[PathBuf]) -> Result<String> {
                     // %-encode filenames
                     // https://url.spec.whatwg.org/#fragment-percent-encode-set
                     const FRAGMENT_SET: &AsciiSet =
-                        &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+                        &CONTROLS
+                            .add(b' ')
+                            .add(b'"')
+                            .add(b'<')
+                            .add(b'>')
+                            .add(b'`')
+                    ;
                     const PATH_SET: &AsciiSet =
-                        &FRAGMENT_SET.add(b'#').add(b'?').add(b'{').add(b'}');
+                        &FRAGMENT_SET
+                            .add(b'#')
+                            .add(b'?')
+                            .add(b'{')
+                            .add(b'}')
+                    ;
                     let full_url = utf8_percent_encode(full_url, &PATH_SET);
 
                     // TODO: Make this a relative URL
-                    writeln!(buf, "<div><a href='/{}'>{}</a></div>", full_url, file_name)
-                        .map_err(Error::WriteInDirList)?;
+                    writeln!(
+                        buf,
+                        "<div><a href='/{}'>{}</a></div>",
+                        full_url,
+                        file_name,
+                    )
+                        .map_err(Error::WriteInDirList)?
+                    ;
                 } else {
                     warn!("non-unicode url: {}", full_url.to_string_lossy());
                 }
@@ -243,10 +288,12 @@ fn make_dir_list_body(root_dir: &Path, paths: &[PathBuf]) -> Result<String> {
     Ok(super::render_html(cfg)?)
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Display)]
-pub enum Error {
+pub
+enum Error {
     // blanket "pass-through" error types
     #[display(fmt = "engine error")]
     Engine(Box<super::Error>),
@@ -269,34 +316,40 @@ pub enum Error {
 }
 
 impl StdError for Error {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        use Error::*;
-
+    fn source (self: &'_ Error)
+      -> Option<&'_ (dyn StdError + 'static)>
+    {
         match self {
-            Engine(e) => Some(e),
-            Io(e) => Some(e),
-            Http(e) => Some(e),
-            MarkdownUtf8 => None,
-            StripPrefixInDirList(e) => Some(e),
-            WriteInDirList(e) => Some(e),
+            Self::Engine(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::Http(e) => Some(e),
+            Self::MarkdownUtf8 => None,
+            Self::StripPrefixInDirList(e) => Some(e),
+            Self::WriteInDirList(e) => Some(e),
         }
     }
 }
 
 impl From<super::Error> for Error {
-    fn from(e: super::Error) -> Error {
+    fn from (e: super::Error)
+      -> Error
+    {
         Error::Engine(Box::new(e))
     }
 }
 
 impl From<http::Error> for Error {
-    fn from(e: http::Error) -> Error {
+    fn from (e: http::Error)
+      -> Error
+    {
         Error::Http(e)
     }
 }
 
 impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Error {
+    fn from (e: io::Error)
+      -> Error
+    {
         Error::Io(e)
     }
 }
