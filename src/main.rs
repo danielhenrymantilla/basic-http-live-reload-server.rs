@@ -3,34 +3,61 @@
 #[macro_use]
 extern crate derive_more;
 
-use bytes::BytesMut;
-use env_logger::{Builder, Env};
-use futures::future;
-use futures::stream::StreamExt;
-use futures::FutureExt;
-use handlebars::Handlebars;
-use http::header::{HeaderMap, HeaderValue};
-use http::status::StatusCode;
-use http::Uri;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{header, Body, Method, Request, Response, Server};
-use log::{debug, error, info, trace, warn};
-use percent_encoding::percent_decode_str;
-use serde::Serialize;
-use std::error::Error as StdError;
-use std::io;
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use structopt::StructOpt;
-use tokio::codec::{BytesCodec, FramedRead};
-use tokio::fs::File;
-use tokio::runtime::Runtime;
+use {
+    ::bytes::{
+        BytesMut,
+    },
+    ::env_logger::{
+        Builder, Env,
+    },
+    ::futures::{
+        future, FutureExt, stream::StreamExt,
+    },
+    ::handlebars::{
+        Handlebars,
+    },
+    ::http::{
+        header::{HeaderMap, HeaderValue},
+        status::StatusCode,
+        Uri,
+    },
+    ::hyper::{
+        header, Body, Method, Request, Response, Server,
+        service::{
+            make_service_fn, service_fn,
+        },
+    },
+    ::log::{
+        {debug, error, info, trace, warn},
+    },
+    ::percent_encoding::{
+        percent_decode_str,
+    },
+    ::serde::{
+        Serialize,
+    },
+    ::std::{
+        error::Error as StdError,
+        io,
+        net::SocketAddr,
+        path::{Path, PathBuf},
+    },
+    ::structopt::{
+        StructOpt,
+    },
+    ::tokio::{
+        codec::{BytesCodec, FramedRead},
+        fs::File,
+        runtime::Runtime,
+    },
+};
 
 // Developer extensions. These are contained in their own module so that the
 // principle HTTP server behavior is not obscured.
 mod ext;
 
-fn main() {
+fn main ()
+{
     // Set up error handling immediately
     if let Err(e) = run() {
         log_error_chain(&e);
@@ -39,7 +66,8 @@ fn main() {
 
 /// Basic error reporting, including the "cause chain". This is used both by the
 /// top-level error reporting and to report internal server errors.
-fn log_error_chain(mut e: &dyn StdError) {
+fn log_error_chain (mut e: &dyn StdError)
+{
     error!("error: {}", e);
     while let Some(source) = e.source() {
         error!("caused by: {}", source);
@@ -50,7 +78,8 @@ fn log_error_chain(mut e: &dyn StdError) {
 /// The configuration object, parsed from command line options.
 #[derive(Clone, StructOpt)]
 #[structopt(about = "A basic HTTP file server")]
-pub struct Config {
+pub
+struct Config {
     /// The IP:PORT combination.
     #[structopt(
         name = "ADDR",
@@ -70,7 +99,9 @@ pub struct Config {
     use_extensions: bool,
 }
 
-fn run() -> Result<()> {
+fn run ()
+  -> Result<()>
+{
     // Initialize logging, and log the "info" level for this crate only, unless
     // the environment contains `RUST_LOG`.
     let env = Env::new().default_filter_or("basic_http_server=info");
@@ -123,7 +154,10 @@ fn run() -> Result<()> {
 ///
 /// Errors are turned into an appropriate HTTP error response, and never
 /// propagated upward for hyper to deal with.
-async fn serve(config: Config, req: Request<Body>) -> Response<Body> {
+async
+fn serve (config: Config, req: Request<Body>)
+  -> Response<Body>
+{
     // Serve the requested file.
     let resp = serve_or_error(config, req).await;
 
@@ -135,7 +169,10 @@ async fn serve(config: Config, req: Request<Body>) -> Response<Body> {
 
 /// Handle all types of requests, but don't deal with transforming internal
 /// errors to HTTP error responses.
-async fn serve_or_error(config: Config, req: Request<Body>) -> Result<Response<Body>> {
+async
+fn serve_or_error (config: Config, req: Request<Body>)
+  -> Result<Response<Body>>
+{
     // This server only supports the GET method. Return an appropriate
     // response otherwise.
     if let Some(resp) = handle_unsupported_request(&req) {
@@ -152,7 +189,10 @@ async fn serve_or_error(config: Config, req: Request<Body>) -> Result<Response<B
 }
 
 /// Serve static files from a root directory.
-async fn serve_file(req: &Request<Body>, root_dir: &PathBuf) -> Result<Response<Body>> {
+async
+fn serve_file (req: &Request<Body>, root_dir: &PathBuf)
+  -> Result<Response<Body>>
+{
     // First, try to do a redirect. If that doesn't happen, then find the path
     // to the static file we want to serve - which may be `index.html` for
     // directories - and send a response containing that file.
@@ -182,7 +222,11 @@ async fn serve_file(req: &Request<Body>, root_dir: &PathBuf) -> Result<Response<
 /// the case for URL `docs/`.
 ///
 /// This seems to match the behavior of other static web servers.
-fn try_dir_redirect(req: &Request<Body>, root_dir: &PathBuf) -> Result<Option<Response<Body>>> {
+fn try_dir_redirect (
+    req: &Request<Body>,
+    root_dir: &PathBuf,
+) -> Result<Option<Response<Body>>>
+{
     if req.uri().path().ends_with("/") {
         return Ok(None);
     }
@@ -216,7 +260,10 @@ fn try_dir_redirect(req: &Request<Body>, root_dir: &PathBuf) -> Result<Option<Re
 ///
 /// If the I/O here fails then an error future will be returned, and `serve`
 /// will convert it into the appropriate HTTP error response.
-async fn respond_with_file(path: PathBuf) -> Result<Response<Body>> {
+async
+fn respond_with_file (path: PathBuf)
+  -> Result<Response<Body>>
+{
     let mime_type = file_path_mime(&path);
 
     let file = File::open(path).await?;
@@ -248,13 +295,17 @@ async fn respond_with_file(path: PathBuf) -> Result<Response<Body>> {
 /// Get a MIME type based on the file extension.
 ///
 /// If the extension is unknown then return "application/octet-stream".
-fn file_path_mime(file_path: &Path) -> mime::Mime {
-    mime_guess::from_path(file_path).first_or_octet_stream()
+fn file_path_mime (file_path: &Path)
+  -> mime::Mime
+{
+    ::mime_guess::from_path(file_path).first_or_octet_stream()
 }
 
 /// Find the local path for a request URI, converting directories to the
 /// `index.html` file.
-fn local_path_with_maybe_index(uri: &Uri, root_dir: &Path) -> Result<PathBuf> {
+fn local_path_with_maybe_index (uri: &Uri, root_dir: &Path)
+  -> Result<PathBuf>
+{
     local_path_for_request(uri, root_dir).map(|mut p: PathBuf| {
         if p.is_dir() {
             p.push("index.html");
@@ -267,7 +318,9 @@ fn local_path_with_maybe_index(uri: &Uri, root_dir: &Path) -> Result<PathBuf> {
 }
 
 /// Map the request's URI to a local path
-fn local_path_for_request(uri: &Uri, root_dir: &Path) -> Result<PathBuf> {
+fn local_path_for_request (uri: &Uri, root_dir: &Path)
+  -> Result<PathBuf>
+{
     debug!("raw URI: {}", uri);
 
     let request_path = uri.path();
@@ -303,7 +356,9 @@ fn local_path_for_request(uri: &Uri, root_dir: &Path) -> Result<PathBuf> {
 
 /// Create an error response if the request contains unsupported methods,
 /// headers, etc.
-fn handle_unsupported_request(req: &Request<Body>) -> Option<Result<Response<Body>>> {
+fn handle_unsupported_request (req: &Request<Body>)
+  -> Option<Result<Response<Body>>>
+{
     get_unsupported_request_message(req)
         .map(|unsup| make_error_response_from_code_and_headers(unsup.code, unsup.headers))
 }
@@ -315,7 +370,9 @@ struct Unsupported {
 }
 
 /// Create messages for unsupported requests.
-fn get_unsupported_request_message(req: &Request<Body>) -> Option<Unsupported> {
+fn get_unsupported_request_message (req: &Request<Body>)
+  -> Option<Unsupported>
+{
     use std::iter::FromIterator;
 
     // https://tools.ietf.org/html/rfc7231#section-6.5.5
@@ -330,7 +387,9 @@ fn get_unsupported_request_message(req: &Request<Body>) -> Option<Unsupported> {
 }
 
 /// Turn any errors into an HTTP error response.
-fn transform_error(resp: Result<Response<Body>>) -> Response<Body> {
+fn transform_error (resp: Result<Response<Body>>)
+  -> Response<Body>
+{
     match resp {
         Ok(r) => r,
         Err(e) => {
@@ -348,7 +407,9 @@ fn transform_error(resp: Result<Response<Body>>) -> Response<Body> {
 }
 
 /// Convert an error to an HTTP error response future, with correct response code.
-fn make_error_response(e: Error) -> Result<Response<Body>> {
+fn make_error_response (e: Error)
+  -> Result<Response<Body>>
+{
     let resp = match e {
         Error::Io(e) => make_io_error_response(e)?,
         Error::Ext(ext::Error::Io(e)) => make_io_error_response(e)?,
@@ -358,7 +419,9 @@ fn make_error_response(e: Error) -> Result<Response<Body>> {
 }
 
 /// Convert an error into a 500 internal server error, and log it.
-fn make_internal_server_error_response(err: Error) -> Result<Response<Body>> {
+fn make_internal_server_error_response (err: Error)
+  -> Result<Response<Body>>
+{
     log_error_chain(&err);
     let resp = make_error_response_from_code(StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(resp)
@@ -366,7 +429,9 @@ fn make_internal_server_error_response(err: Error) -> Result<Response<Body>> {
 
 /// Handle the one special IO error (file not found) by returning a 404, otherwise
 /// return a 500.
-fn make_io_error_response(error: io::Error) -> Result<Response<Body>> {
+fn make_io_error_response (error: io::Error)
+  -> Result<Response<Body>>
+{
     let resp = match error.kind() {
         io::ErrorKind::NotFound => {
             debug!("{}", error);
@@ -378,31 +443,37 @@ fn make_io_error_response(error: io::Error) -> Result<Response<Body>> {
 }
 
 /// Make an error response given an HTTP status code.
-fn make_error_response_from_code(status: StatusCode) -> Result<Response<Body>> {
+fn make_error_response_from_code (status: StatusCode)
+  -> Result<Response<Body>>
+{
     make_error_response_from_code_and_headers(status, HeaderMap::new())
 }
 
 /// Make an error response given an HTTP status code and response headers.
-fn make_error_response_from_code_and_headers(
+fn make_error_response_from_code_and_headers (
     status: StatusCode,
     headers: HeaderMap,
-) -> Result<Response<Body>> {
+) -> Result<Response<Body>>
+{
     let body = render_error_html(status)?;
     let resp = html_str_to_response_with_headers(body, status, headers)?;
     Ok(resp)
 }
 
 /// Make an HTTP response from a HTML string.
-fn html_str_to_response(body: String, status: StatusCode) -> Result<Response<Body>> {
+fn html_str_to_response (body: String, status: StatusCode)
+  -> Result<Response<Body>>
+{
     html_str_to_response_with_headers(body, status, HeaderMap::new())
 }
 
 /// Make an HTTP response from a HTML string and response headers.
-fn html_str_to_response_with_headers(
+fn html_str_to_response_with_headers (
     body: String,
     status: StatusCode,
     headers: HeaderMap,
-) -> Result<Response<Body>> {
+) -> Result<Response<Body>>
+{
     let mut builder = Response::builder();
 
     builder.headers_mut().map(|h| h.extend(headers));
@@ -416,7 +487,7 @@ fn html_str_to_response_with_headers(
 }
 
 /// A handlebars HTML template.
-static HTML_TEMPLATE: &str = include_str!("template.html");
+const HTML_TEMPLATE: &str = include_str!("template.html");
 
 /// The data for the handlebars HTML template. Handlebars will use serde to get
 /// the data out of the struct and mapped onto the template.
@@ -427,7 +498,9 @@ struct HtmlCfg {
 }
 
 /// Render an HTML page with handlebars, the template and the configuration data.
-fn render_html(cfg: HtmlCfg) -> Result<String> {
+fn render_html (cfg: HtmlCfg)
+  -> Result<String>
+{
     let reg = Handlebars::new();
     let rendered = reg
         .render_template(HTML_TEMPLATE, &cfg)
@@ -436,7 +509,9 @@ fn render_html(cfg: HtmlCfg) -> Result<String> {
 }
 
 /// Render an HTML page from an HTTP status code
-fn render_error_html(status: StatusCode) -> Result<String> {
+fn render_error_html (status: StatusCode)
+  -> Result<String>
+{
     render_html(HtmlCfg {
         title: format!("{}", status),
         body: String::new(),
@@ -444,7 +519,8 @@ fn render_error_html(status: StatusCode) -> Result<String> {
 }
 
 /// A custom `Result` typedef
-pub type Result<T> = std::result::Result<T, Error>;
+pub
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The basic-http-server error type.
 ///
@@ -465,7 +541,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// These errors use `derive(Display)` from the `derive-more` crate to reduce
 /// boilerplate.
 #[derive(Debug, Display)]
-pub enum Error {
+pub
+enum Error {
     // blanket "pass-through" error types
     #[display(fmt = "Extension error")]
     Ext(ext::Error),
@@ -494,7 +571,9 @@ pub enum Error {
 }
 
 impl StdError for Error {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+    fn source (self: &'_ Error)
+      -> Option<&'_ (dyn StdError + 'static)>
+    {
         use Error::*;
 
         match self {
@@ -511,25 +590,33 @@ impl StdError for Error {
 }
 
 impl From<ext::Error> for Error {
-    fn from(e: ext::Error) -> Error {
+    fn from (e: ext::Error)
+      -> Error
+    {
         Error::Ext(e)
     }
 }
 
 impl From<http::Error> for Error {
-    fn from(e: http::Error) -> Error {
+    fn from (e: http::Error)
+      -> Error
+    {
         Error::Http(e)
     }
 }
 
 impl From<hyper::Error> for Error {
-    fn from(e: hyper::Error) -> Error {
+    fn from (e: hyper::Error)
+      -> Error
+    {
         Error::Hyper(e)
     }
 }
 
 impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Error {
+    fn from (e: io::Error)
+      -> Error
+    {
         Error::Io(e)
     }
 }
