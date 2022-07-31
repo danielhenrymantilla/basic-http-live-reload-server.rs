@@ -49,34 +49,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
-name = "basic-http-server"
-version = "0.8.1"
-dependencies = [
- "anyhow",
- "bytes",
- "clap",
- "comrak",
- "derive_more",
- "env_logger",
- "extension-traits",
- "futures",
- "handlebars",
- "http",
- "hyper",
- "local-ip-address",
- "log",
- "mime",
- "mime_guess",
- "percent-encoding",
- "serde",
- "structopt",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite",
- "tokio-util",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -470,6 +442,34 @@ dependencies = [
  "bytes",
  "http",
  "pin-project-lite",
+]
+
+[[package]]
+name = "http-live-reload-server"
+version = "0.8.1"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "comrak",
+ "derive_more",
+ "env_logger",
+ "extension-traits",
+ "futures",
+ "handlebars",
+ "http",
+ "hyper",
+ "local-ip-address",
+ "log",
+ "mime",
+ "mime_guess",
+ "percent-encoding",
+ "serde",
+ "structopt",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tokio-util",
 ]
 
 [[package]]

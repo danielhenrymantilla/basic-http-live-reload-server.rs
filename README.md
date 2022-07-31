@@ -1,92 +1,63 @@
-# `basic-http-server`
+# `http-live-reload-server`
 
-A simple static HTTP server, for learning and local development.
+Toy project. A fork of `basic-http-server` with:
 
-`basic-http-server` is designed for two purposes:
-
-- _as a teaching tool_. It is a simple and well-commented example of
-  basic [`tokio`], [`hyper`], and asynchronous Rust programming,
-  with `async` / `await`.
-
-- _for local development_. It serves static HTML content, and with the `-x`
-   flag, provides convenience features useful for creating developer
-   documentation, including markdown rendering and directory listing.
- 
-The entire reference source for setting up a `hyper` HTTP server is contained in
-[`main.rs`]. The [`ext.rs`] file contains developer extensions.
-
-[`tokio`]: https://github.com/tokio-rs/tokio
-[`hyper`]: https://github.com/hyperium/hyper
-[`main.rs`]: src/main.rs
-[`ext.rs`]: src/ext.rs
-
-
-## Developer extensions
-
-When passed the `-x` flag, `basic-http-server` enables additional conveniences
-useful for developing documentation locally. Those extensions are:
-
-- Rendering files with the ".md" extension as Markdown.
-
-- Listing directories when no "index.html" file is found.
-
-- Serving common source code files as "text/plain" so they are
-  rendered in the browser.
-
-This makes `basic-http-server` useful for the following scenarios:
-
-- Previewing markdown content. Draft your `README.md` changes and view them
-  locally before pushing to GitHub.
-
-- Navigating to local documentation, including Rust API documentation. Just run
-  `basic-http-server -x` in your project directory, and use the directory
-  listing to navigate to `target/doc`, then find the crates to read from there
-  (`cargo doc` doesn't put an `index.html` file in `target/doc`).
-
+  - dependencies updated;
+  - a focus on serving actual static websites
+    (_e.g._, no `-x` developer extensions)
+  - with **live reload** as its main feature
+  - everything else has been trimmed out to keep it simple (but there are
+    still too many deps for my taste…).
 
 ## Installation and Use
 
-**Note that `basic-http-server` is not production-ready and should not be
+**Note that `http-live-reload-server` is not production-ready and should not be
 exposed to the internet. It is a learning and development tool.**
 
-Install with `cargo install`:
+ 1. Install with `cargo install`:
 
-```sh
-$ cargo install basic-http-server
-$ basic-http-server
-```
+    ```bash
+    # Notice the current lack of versioning: UNSTABLE!
+    cargo install --git 'https://github.com/danielhenrymantilla/http-live-reload-server.rs'
+    ```
 
-To turn on the developer extensions, pass `-x`:
+ 1. You can then run it with just:
 
-```sh
-$ basic-http-server -x
-```
+    ```bash
+    http-live-reload-server
+    ```
+
+ 1. The recommended way of using it, for its live-reload capabilities, is to
+    use it in conjunction with the excellent [`watchexec`] tool:
+
+    ```bash
+    watchexec -e html,css,js -c --on-busy-update restart -- http-live-reload-server # <extra flags>
+    ```
+
+[`watchexec`]: https://watchexec.github.io/
 
 To increase logging verbosity use `RUST_LOG`:
 
 ```sh
-RUST_LOG=basic_http_server=trace basic-http-server -x
+RUST_LOG=http_live_reload_server=debug http-live-reload-server # <extra flags>
 ```
 
 Command line arguments:
 
 ```
 USAGE:
-        basic-http-server [FLAGS] [OPTIONS] [ARGS]
+    http-live-reload-server [FLAGS] [OPTIONS] [ARGS]
 
 FLAGS:
-    -x               Enable developer extensions
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -a, --addr <ADDR>    Sets the IP:PORT combination (default "127.0.0.1:4000")
+    -a, --addr <ADDR>    Sets the IP:PORT combination (default "0.0.0.0:4000")
 
 ARGS:
     ROOT    Sets the root directory (default ".")
-
 ```
-
 
 ## License
 

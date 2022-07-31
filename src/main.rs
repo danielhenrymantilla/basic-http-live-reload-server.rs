@@ -122,10 +122,14 @@ fn run ()
 {
     // Initialize logging, and log the "info" level for this crate only, unless
     // the environment contains `RUST_LOG`.
-    Builder::from_env(Env::new().default_filter_or("basic_http_server=info"))
-        .default_format_module_path(false)
-        .default_format_timestamp(false)
-        .init()
+    Builder::from_env(
+        Env::new().default_filter_or(concat!(
+            env!("CARGO_CRATE_NAME"), "=", "info",
+        ))
+    )
+    .default_format_module_path(false)
+    .default_format_timestamp(false)
+    .init()
     ;
     // Create the configuration from the command line arguments. It
     // includes the IP address and port to listen on and the path to use
@@ -133,7 +137,7 @@ fn run ()
     let config = Config::from_args();
 
     // Display the configuration to be helpful
-    info!("basic-http-server {}", env!("CARGO_PKG_VERSION"));
+    info!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     info!("addr: http://{}", config.addr);
     info!("root dir: {}", config.root_dir.display());
     info!("extensions: {}", config.use_extensions);
