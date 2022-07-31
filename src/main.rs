@@ -72,8 +72,6 @@ mod utils;
 pub
 type Result<T, E = Error> = ::std::result::Result<T, E>;
 
-const WS_PORT: u16 = 8090;
-
 fn main ()
 {
     // Set up error handling immediately
@@ -108,13 +106,17 @@ struct Config {
     )]
     addr: SocketAddr,
 
+    /// The port to use for the websocket server (for the live-reload feature)
+    #[structopt(
+        name = "PORT",
+        long = "ws-port",
+        default_value = "8090",
+    )]
+    ws_port: u16,
+
     /// The root directory for serving files.
     #[structopt(name = "ROOT", parse(from_os_str), default_value = ".")]
     root_dir: PathBuf,
-
-    /// Enable developer extensions.
-    #[structopt(short = "x")]
-    use_extensions: bool,
 }
 
 fn run ()
@@ -140,7 +142,6 @@ fn run ()
     info!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     info!("addr: http://{}", config.addr);
     info!("root dir: {}", config.root_dir.display());
-    info!("extensions: {}", config.use_extensions);
 
     ::local_ip_address::list_afinet_netifas()
         .ok()
@@ -201,7 +202,7 @@ fn spin_ws_server (config: &'_ Config)
     loop {
         let ws =
             ::tokio_tungstenite::accept_async(
-                ::tokio::net::TcpListener::bind((config.addr.ip(), WS_PORT))
+                ::tokio::net::TcpListener::bind((config.addr.ip(), config.ws_port))
                     .await?
                     .accept()
                     .await?
@@ -330,8 +331,7 @@ fn respond_with_file (
 
             let injected_js = format!(
                 include_str!("client_template.html"),
-                addr = config.addr.ip(),
-                port = WS_PORT,
+                port = config.ws_port,
             );
             len += injected_js.len() as u64;
             Box::pin(file.chain(::std::io::Cursor::new(injected_js)))

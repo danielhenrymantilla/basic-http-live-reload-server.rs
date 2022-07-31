@@ -4,7 +4,7 @@
  */
  (()=>{{
     // alert("success!");
-    const socketUrl = 'ws://{addr}:{port}';
+    const socketUrl = `ws://${{window.location.hostname}}:{port}`;
     let socket = new WebSocket(socketUrl);
     socket.addEventListener('close',()=>{{
       // Then the server has been turned off,
