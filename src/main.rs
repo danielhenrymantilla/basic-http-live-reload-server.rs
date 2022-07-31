@@ -72,6 +72,8 @@ mod utils;
 pub
 type Result<T, E = Error> = ::std::result::Result<T, E>;
 
+const WS_PORT: u16 = 8090;
+
 fn main ()
 {
     // Set up error handling immediately
@@ -102,7 +104,7 @@ struct Config {
         short = "a",
         long = "addr",
         parse(try_from_str),
-        default_value = "127.0.0.1:4000"
+        default_value = "0.0.0.0:4000", // "127.0.0.1:4000"
     )]
     addr: SocketAddr,
 
@@ -136,6 +138,18 @@ fn run ()
     info!("root dir: {}", config.root_dir.display());
     info!("extensions: {}", config.use_extensions);
 
+    ::local_ip_address::list_afinet_netifas()
+        .ok()
+        .map(|it| { info!("Available (IPv4 LAN) address(es):"); it })
+        .into_iter()
+        .flatten()
+        .for_each(|(_name, ip)| {
+            if matches!(ip, ::std::net::IpAddr::V4(ip) if ip.is_private()) {
+                info!("\t-a {0}:{1} | http://{0}:{1}", ip, config.addr.port());
+            }
+        })
+    ;
+
     // Create the MakeService object that creates a new Hyper service for every
     // connection. Both these closures need to return a Future of Result, and we
     // use two different mechanisms to achieve that.
@@ -157,10 +171,13 @@ fn run ()
     // Create a Tokio runtime and block on Hyper forever.
     let rt = Runtime::new()?;
 
-    rt.spawn(async {
-        spin_ws_server()
-            .await
-            .unwrap()
+    rt.spawn({
+        let config = config.clone();
+        async move {
+            spin_ws_server(&config)
+                .await
+                .unwrap()
+        }
     });
     rt.block_on(async {
         // Create a Hyper Server, binding to an address, and use
@@ -174,13 +191,13 @@ fn run ()
 }
 
 async
-fn spin_ws_server ()
+fn spin_ws_server (config: &'_ Config)
   -> ::anyhow::Result<()>
 {
     loop {
         let ws =
             ::tokio_tungstenite::accept_async(
-                ::tokio::net::TcpListener::bind(("127.0.0.1", 8090))
+                ::tokio::net::TcpListener::bind((config.addr.ip(), WS_PORT))
                     .await?
                     .accept()
                     .await?
@@ -188,7 +205,7 @@ fn spin_ws_server ()
             )
             .await?
         ;
-        ws.for_each(|_| async {}).await;
+        let _ = ::tokio::task::spawn(ws.for_each(|_| async {}));
     }
 }
 
@@ -218,22 +235,28 @@ fn serve_or_error (config: Config, req: Request<Body>)
         return resp;
     }
     // Serve the requested file.
-    serve_file(&req, &config.root_dir).await
+    serve_file(&req, &config).await
 }
 
 /// Serve static files from a root directory.
 async
-fn serve_file (req: &Request<Body>, root_dir: &PathBuf)
-  -> Result<Response<Body>>
+fn serve_file (
+    req: &Request<Body>,
+    config: &'_ Config,
+) -> Result<Response<Body>>
 {
+    let root_dir = &config.root_dir;
     // First, try to do a redirect. If that doesn't happen, then find the path
     // to the static file we want to serve - which may be `index.html` for
     // directories - and send a response containing that file.
     if let Some(redir_resp) = try_dir_redirect(req, &root_dir)? {
         Ok(redir_resp)
     } else {
-        respond_with_file(&local_path_with_maybe_index(req.uri(), &root_dir)?)
-            .await
+        respond_with_file(
+            &local_path_with_maybe_index(req.uri(), &root_dir)?,
+            config,
+        )
+        .await
     }
 }
 
@@ -286,8 +309,10 @@ fn try_dir_redirect (
 /// If the I/O here fails then an error future will be returned, and `serve`
 /// will convert it into the appropriate HTTP error response.
 async
-fn respond_with_file (path: &Path)
-  -> Result<Response<Body>>
+fn respond_with_file (
+    path: &Path,
+    config: &Config,
+) -> Result<Response<Body>>
 {
     let mime_type = file_path_mime(&path);
     let file = File::open(path).await?;
@@ -299,9 +324,13 @@ fn respond_with_file (path: &Path)
         )
         {
 
-            let injected_js = &include_bytes!("client_template.html")[..];
+            let injected_js = format!(
+                include_str!("client_template.html"),
+                addr = config.addr.ip(),
+                port = WS_PORT,
+            );
             len += injected_js.len() as u64;
-            Box::pin(file.chain(injected_js))
+            Box::pin(file.chain(::std::io::Cursor::new(injected_js)))
         } else {
             Box::pin(file)
         }
@@ -413,22 +442,15 @@ fn get_unsupported_request_message (req: &Request<Body>)
 fn transform_error (resp: Result<Response<Body>>)
   -> Response<Body>
 {
-    resp.or_else(|ref err| make_error_response_from_code(match err {
-            Error::Io(io_err) => match io_err.kind() {
-                io::ErrorKind::NotFound => {
-                    debug!("{}", io_err);
-                    StatusCode::NOT_FOUND
-                },
-                _ => {
-                    log_error_chain(err);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                },
-            },
-            _ => {
+    resp.or_else(|ref err| make_error_response_from_code(
+            if let Error::Io(io_err) = err {
+                debug!("{}", io_err);
+                StatusCode::NOT_FOUND
+            } else {
                 log_error_chain(err);
                 StatusCode::INTERNAL_SERVER_ERROR
-            },
-        }))
+            }
+        ))
         .unwrap_or_else(|e| {
             // Last-ditch error reporting if
             // even making the error response failed.
@@ -453,13 +475,6 @@ fn make_error_response_from_code_and_headers (
 {
     let body = render_error_html(status)?;
     html_str_to_response_with_headers(body, status, headers)
-}
-
-/// Make an HTTP response from a HTML string.
-fn html_str_to_response (body: String, status: StatusCode)
-  -> Result<Response<Body>>
-{
-    html_str_to_response_with_headers(body, status, HeaderMap::new())
 }
 
 /// Make an HTTP response from a HTML string and response headers.
