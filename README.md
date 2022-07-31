@@ -1,5 +1,28 @@
 # `http-live-reload-server`
 
+```console
+http-live-reload-server 0.8.1
+Brian Anderson <andersrb@gmail.com>, Daniel Henry-Mantilla <danielhenrymantilla@gmail.com>
+A basic HTTP file server, with live reload capabilities!
+
+USAGE:
+    http-live-reload-server [FLAGS] [OPTIONS] [ROOT]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+        --watch      Whether to spin a `watchexec` instance with the magical invocation
+
+OPTIONS:
+    -a, --addr <ADDR>       The IP:PORT combination. [default: 0.0.0.0:4000]
+        --ws-port <PORT>    The port to use for the websocket server (for the live-reload feature) [default: 8090]
+
+ARGS:
+    <ROOT>    The root directory for serving files. [default: .]
+```
+
+___
+
 Toy project. A fork of `basic-http-server` with:
 
   - dependencies updated;
@@ -31,32 +54,24 @@ exposed to the internet. It is a learning and development tool.**
     use it in conjunction with the excellent [`watchexec`] tool:
 
     ```bash
-    watchexec -e html,css,js -c --on-busy-update restart -- http-live-reload-server # <extra flags>
+    watchexec -e html,css,js -c --on-busy-update restart -- http-live-reload-server # <extra flags or args>
     ```
+
+    Since this is expected to be so pervasive, `http-live-reload-server` comes
+    with a flag to alias this:
+
+    ```bash
+    http-live-reload-server --watch # <extra flags or args>
+    ```
+
+      - Note that this will run whatever `watchexec` is in `PATH`!
 
 [`watchexec`]: https://watchexec.github.io/
 
 To increase logging verbosity use `RUST_LOG`:
 
 ```sh
-RUST_LOG=http_live_reload_server=debug http-live-reload-server # <extra flags>
-```
-
-Command line arguments:
-
-```
-USAGE:
-    http-live-reload-server [FLAGS] [OPTIONS] [ARGS]
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -a, --addr <ADDR>    Sets the IP:PORT combination (default "0.0.0.0:4000")
-
-ARGS:
-    ROOT    Sets the root directory (default ".")
+RUST_LOG=http_live_reload_server=debug http-live-reload-server # <extra flags or args>
 ```
 
 ## License

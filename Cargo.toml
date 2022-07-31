@@ -1,7 +1,10 @@
 [package]
 name = "http-live-reload-server"
 version = "0.8.1"
-authors = ["Brian Anderson <andersrb@gmail.com>"]
+authors = [
+    "Brian Anderson <andersrb@gmail.com>",
+    "Daniel Henry-Mantilla <danielhenrymantilla@gmail.com>",
+]
 license = "MIT/Apache-2.0"
 description = "A simple static HTTP file server, for learning and local development"
 homepage = "https://github.com/brson/basic-http-server"

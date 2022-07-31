@@ -93,7 +93,7 @@ fn log_error_chain (mut e: &dyn StdError)
 
 /// The configuration object, parsed from command line options.
 #[derive(Clone, StructOpt)]
-#[structopt(about = "A basic HTTP file server")]
+#[structopt(about = "A basic HTTP file server, with live reload capabilities!")]
 pub
 struct Config {
     /// The IP:PORT combination.
@@ -113,6 +113,10 @@ struct Config {
         default_value = "8090",
     )]
     ws_port: u16,
+
+    /// Whether to spin a `watchexec` instance with the magical invocation
+    #[structopt(long)]
+    watch: bool,
 
     /// The root directory for serving files.
     #[structopt(name = "ROOT", parse(from_os_str), default_value = ".")]
@@ -137,6 +141,10 @@ fn run ()
     // includes the IP address and port to listen on and the path to use
     // as the HTTP server's root directory.
     let config = Config::from_args();
+
+    if config.watch {
+        return spin_watchexec_instead(config);
+    }
 
     // Display the configuration to be helpful
     info!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
@@ -525,4 +533,29 @@ fn render_error_html (status: StatusCode)
         title: format!("{}", status),
         body: String::new(),
     })
+}
+
+fn spin_watchexec_instead (config: Config)
+  -> Result<()>
+{
+    ::std::process::Command::new("watchexec")
+        .args(&[
+            "-e", "html,css,js",
+            "-c",
+            "--on-busy-update", "restart",
+            "--",
+            &::std::env::args().nth(0).expect("argv[0] to be there"),
+            "-a", &config.addr.to_string(),
+            "--ws-port", &config.ws_port.to_string(),
+            &config.root_dir.to_str().expect("UTF-8 root dir"),
+        ])
+        .status()
+        .map(|status| {
+            status
+                .success()
+                .not()
+                .then(|| panic!("command failed"))
+            ;
+        })
+        .map_err(Into::into)
 }
