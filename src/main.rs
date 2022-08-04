@@ -151,17 +151,22 @@ fn run ()
     info!("addr: http://{}", config.addr);
     info!("root dir: {}", config.root_dir.display());
 
-    ::local_ip_address::list_afinet_netifas()
-        .ok()
-        .map(|it| { info!("Available (IPv4 LAN) address(es):"); it })
-        .into_iter()
-        .flatten()
-        .for_each(|(_name, ip)| {
-            if matches!(ip, ::std::net::IpAddr::V4(ip) if ip.is_private()) {
-                info!("\t-a {0}:{1} | http://{0}:{1}", ip, config.addr.port());
-            }
-        })
-    ;
+    if config.addr.ip().is_unspecified() {
+        info!("");
+        info!("Local-Development address:");
+        info!("\thttp://localhost:{}", config.addr.port());
+        ::local_ip_address::list_afinet_netifas()
+            .ok()
+            .map(|it| { info!("Available (IPv4 LAN) address(es):"); it })
+            .into_iter()
+            .flatten()
+            .for_each(|(_name, ip)| {
+                if matches!(ip, ::std::net::IpAddr::V4(ip) if ip.is_private()) {
+                    info!("\thttp://{0}:{1} | flag: -a {0}:{1} ", ip, config.addr.port());
+                }
+            })
+        ;
+        }
 
     // Create the MakeService object that creates a new Hyper service for every
     // connection. Both these closures need to return a Future of Result, and we
