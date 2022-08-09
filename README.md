@@ -47,24 +47,25 @@ exposed to the internet. It is a learning and development tool.**
  1. You can then run it with just:
 
     ```bash
-    http-live-reload-server
+    http-live-reload-server --no-watch
     ```
 
  1. The recommended way of using it, for its live-reload capabilities, is to
     use it in conjunction with the excellent [`watchexec`] tool:
 
     ```bash
-    watchexec -e html,css,js -c --on-busy-update restart -- http-live-reload-server # <extra flags or args>
+    watchexec -e html,css,js -c --on-busy-update restart -- http-live-reload-server --no-watch # <extra flags or args>
     ```
 
-    Since this is expected to be so pervasive, `http-live-reload-server` comes
-    with a flag to alias this:
+    Since this is expected to be so pervasive, `http-live-reload-server` by default aliases to this:
 
     ```bash
-    http-live-reload-server --watch # <extra flags or args>
+    http-live-reload-server # <extra flags or args>
     ```
 
       - Note that this will run whatever `watchexec` is in `PATH`!
+
+      - `--no-watch` is thus the way to opt out of this behavior.
 
 [`watchexec`]: https://watchexec.github.io/
 

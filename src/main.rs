@@ -11,7 +11,7 @@ use {
         Builder, Env,
     },
     ::futures::{
-        future, FutureExt, stream::StreamExt,
+        stream::StreamExt,
     },
     ::handlebars::{
         Handlebars,
@@ -102,7 +102,7 @@ struct Config {
         short = "a",
         long = "addr",
         parse(try_from_str),
-        default_value = "0.0.0.0:4000", // "127.0.0.1:4000"
+        default_value = "0.0.0.0:4000",
     )]
     addr: SocketAddr,
 
@@ -114,8 +114,9 @@ struct Config {
     )]
     ws_port: u16,
 
-    /// Whether to spin a `watchexec` instance with the magical invocation
-    #[structopt(long)]
+    /// Don't wrap the invocation in `watchexec`
+    /// (needed to live-reload when files change)
+    #[structopt(long = "no-watch", parse(from_flag = bool::not))]
     watch: bool,
 
     /// The root directory for serving files.
@@ -162,7 +163,10 @@ fn run ()
             .flatten()
             .for_each(|(_name, ip)| {
                 if matches!(ip, ::std::net::IpAddr::V4(ip) if ip.is_private()) {
-                    info!("\thttp://{0}:{1} | flag: -a {0}:{1} ", ip, config.addr.port());
+                    info!(
+                        "\thttp://{0}:{1} | flag: -a {0}:{1} ",
+                        ip, config.addr.port(),
+                    );
                 }
             })
         ;
@@ -176,14 +180,10 @@ fn run ()
 
         let service = service_fn(move |req| {
             let config = config.clone();
-
-            // Handle the request, returning a Future of Response,
-            // and map it to a Future of Result of Response.
-            serve(config, req).map(Ok::<_, Error>)
+            async { Ok::<_, Error>(serve(config, req).await) }
         });
 
-        // Convert the concrete (non-future) service function to a Future of Result.
-        future::ok::<_, Error>(service)
+        async { Ok::<_, Error>(service) }
     });
 
     // Create a Tokio runtime and block on Hyper forever.
@@ -215,7 +215,10 @@ fn spin_ws_server (config: &'_ Config)
     loop {
         let ws =
             ::tokio_tungstenite::accept_async(
-                ::tokio::net::TcpListener::bind((config.addr.ip(), config.ws_port))
+                ::tokio::net::TcpListener::bind((
+                        config.addr.ip(),
+                        config.ws_port,
+                    ))
                     .await?
                     .accept()
                     .await?
@@ -521,7 +524,8 @@ struct HtmlCfg {
     body: String,
 }
 
-/// Render an HTML page with handlebars, the template and the configuration data.
+/// Render an HTML page with handlebars, the template and the configuration
+/// data.
 fn render_html (cfg: HtmlCfg)
   -> Result<String>
 {
@@ -543,16 +547,20 @@ fn render_error_html (status: StatusCode)
 fn spin_watchexec_instead (config: Config)
   -> Result<()>
 {
+    let ref root_dir = config.root_dir.canonicalize()?;
+    let ref root_dir = root_dir.to_str().expect("UTF-8 root dir");
     ::std::process::Command::new("watchexec")
         .args(&[
+            "--watch", root_dir,
             "-e", "html,css,js",
-            "-c",
             "--on-busy-update", "restart",
+            "-c",
             "--",
             &::std::env::args().nth(0).expect("argv[0] to be there"),
             "-a", &config.addr.to_string(),
             "--ws-port", &config.ws_port.to_string(),
-            &config.root_dir.to_str().expect("UTF-8 root dir"),
+            "--no-watch",
+            root_dir,
         ])
         .status()
         .map(|status| {
